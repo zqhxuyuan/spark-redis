@@ -68,24 +68,34 @@ case class RedisEndpoint(val host: String = Protocol.DEFAULT_HOST,
     * @return a new Jedis instance
     */
   def connect(): Jedis = {
-    if (pool == null) {
-      pool = new JedisPool(new GenericObjectPoolConfig(), host, port, timeout, auth, dbNum)
+    val conn = new Jedis(host, port, timeout, dbNum)
+    if (auth != null && !auth.isEmpty) {
+      conn.auth(auth)
     }
-    var sleepTime: Int = 4
-    var jedis: Jedis = null
-    while (jedis == null) {
-      try {
-        jedis = pool.getResource
-      }
-      catch {
-        case e: JedisConnectionException if e.getCause.toString.contains("ERR max number of clients reached") => {
-          if (sleepTime < 500) sleepTime *= 2
-          Thread.sleep(sleepTime)
-        }
-        case e: Exception => throw e
-      }
+    if (dbNum != 0) {
+      conn.select(dbNum)
     }
-    jedis
+
+    conn
+//
+//    if (pool == null) {
+//      pool = new JedisPool(new GenericObjectPoolConfig(), host, port, timeout, auth, dbNum)
+//    }
+//    var sleepTime: Int = 4
+//    var jedis: Jedis = null
+//    while (jedis == null) {
+//      try {
+//        jedis = pool.getResource
+//      }
+//      catch {
+//        case e: JedisConnectionException if e.getCause.toString.contains("ERR max number of clients reached") => {
+//          if (sleepTime < 500) sleepTime *= 2
+//          Thread.sleep(sleepTime)
+//        }
+//        case e: Exception => throw e
+//      }
+//    }
+//    jedis
   }
   def disconnect() {
     if (pool != null) {
