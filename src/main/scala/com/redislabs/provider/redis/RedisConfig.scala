@@ -21,7 +21,10 @@ case class RedisEndpoint(val host: String = Protocol.DEFAULT_HOST,
                          val port: Int = Protocol.DEFAULT_PORT,
                          val auth: String = null,
                          val dbNum: Int = Protocol.DEFAULT_DATABASE,
-                         val timeout: Int = Protocol.DEFAULT_TIMEOUT)
+                         val timeout: Int = Protocol.DEFAULT_TIMEOUT,
+                         val zkHost: String = "",
+                         val zkDir: String = "",
+                         val zkTimeout: Int = 30000)
   extends Serializable {
 
   /**
@@ -30,13 +33,16 @@ case class RedisEndpoint(val host: String = Protocol.DEFAULT_HOST,
     * @param conf spark context config
     */
   def this(conf: SparkConf) {
-      this(
-        conf.get("redis.host", Protocol.DEFAULT_HOST),
-        conf.getInt("redis.port", Protocol.DEFAULT_PORT),
-        conf.get("redis.auth", null),
-        conf.getInt("redis.db", Protocol.DEFAULT_DATABASE),
-        conf.getInt("redis.timeout", Protocol.DEFAULT_TIMEOUT)
-      )
+    this(
+      conf.get("redis.host", Protocol.DEFAULT_HOST),
+      conf.getInt("redis.port", Protocol.DEFAULT_PORT),
+      conf.get("redis.auth", null),
+      conf.getInt("redis.db", Protocol.DEFAULT_DATABASE),
+      conf.getInt("redis.timeout", Protocol.DEFAULT_TIMEOUT),
+      conf.get("codis.zk.host", "localhost:2181"),
+      conf.get("codis.zk.dir", "/zk/codis/db_test/proxy"),
+      conf.getInt("codis.zk.timeout", 30000)
+    )
   }
 
   /**
@@ -64,7 +70,9 @@ case class RedisEndpoint(val host: String = Protocol.DEFAULT_HOST,
     * @return a new Jedis instance
     */
   def connect(): Jedis = {
-    ConnectionPool.connect(this)
+    //println("zkHost:" + zkHost)
+    if(zkHost.equals("")) ConnectionPool.connect(this)
+    else ConnectionPool.connectCodis(this)
   }
 }
 
@@ -85,6 +93,10 @@ case class RedisNode(val endpoint: RedisEndpoint,
 class RedisConfig(val initialHost: RedisEndpoint) extends  Serializable {
 
   val initialAddr = initialHost.host
+  val zkHosts = initialHost.zkHost
+  val zkDir = initialHost.zkDir
+  val zkTimeout = initialHost.zkTimeout
+  val redisTimeout = initialHost.timeout
 
   val hosts = getHosts(initialHost)
   val nodes = getNodes(initialHost)
@@ -184,7 +196,7 @@ class RedisConfig(val initialHost: RedisEndpoint) extends  Serializable {
 
       //simply re-enter this function witht he master host/port
       getNonClusterNodes(initialHost = new RedisEndpoint(host, port,
-        initialHost.auth, initialHost.dbNum))
+        initialHost.auth, initialHost.dbNum, redisTimeout, zkHosts, zkDir, zkTimeout))
 
     } else {
       //this is a master - take its slaves
@@ -200,7 +212,7 @@ class RedisConfig(val initialHost: RedisEndpoint) extends  Serializable {
       val range = nodes.size
       (0 until range).map(i =>
         RedisNode(new RedisEndpoint(nodes(i)._1, nodes(i)._2, initialHost.auth, initialHost.dbNum,
-                    initialHost.timeout),
+                    initialHost.timeout, zkHosts, zkDir, zkTimeout),
           0, 16383, i, range)).toArray
     }
   }
@@ -229,8 +241,7 @@ class RedisConfig(val initialHost: RedisEndpoint) extends  Serializable {
           val node = slotInfo(i + 2).asInstanceOf[java.util.List[java.lang.Object]]
           val host = SafeEncoder.encode(node.get(0).asInstanceOf[Array[scala.Byte]])
           val port = node.get(1).toString.toInt
-          RedisNode(new RedisEndpoint(host, port, initialHost.auth, initialHost.dbNum,
-                      initialHost.timeout),
+          RedisNode(new RedisEndpoint(host, port, initialHost.auth, initialHost.dbNum, initialHost.timeout, zkHosts, zkDir, zkTimeout),
                     sPos,
                     ePos,
                     i,
